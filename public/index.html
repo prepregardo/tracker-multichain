@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>pre-is-the-greatest tracker</title>
+  <style>
+    body{font-family:Inter,system-ui,Arial;margin:0;background:#0b1220;color:#e9f0ff}
+    header{padding:14px 18px;background:#101a2d;display:flex;justify-content:space-between;align-items:center}
+    main{padding:18px;max-width:1100px;margin:0 auto}
+    .row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+    input,select,button{padding:8px 10px;border-radius:8px;border:1px solid #2d3f63;background:#13213a;color:#fff}
+    button{cursor:pointer;background:#2f66ff;border:none}
+    table{width:100%;border-collapse:collapse;background:#101a2d;border-radius:10px;overflow:hidden}
+    th,td{padding:10px;border-bottom:1px solid #1f2f4d;text-align:left;font-size:14px}
+    .card{background:#101a2d;padding:14px;border-radius:12px;margin-bottom:14px}
+    .muted{opacity:.8;font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <strong>⚔ pre-is-the-greatest | Multi-chain Tracker (ERC20/TRC20)</strong>
+    <div>
+      <span id="who"></span>
+      <a id="login" href="/pre-is-the-greatest/auth/google" style="color:#9cc1ff">Login Google</a>
+      <a id="logout" href="/pre-is-the-greatest/auth/logout" style="color:#ffb4b4;display:none">Logout</a>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row">
+        <select id="network"><option>ERC20</option><option>TRC20</option></select>
+        <input id="address" placeholder="wallet address"/>
+        <input id="label" placeholder="label"/>
+        <button onclick="addWallet()">Add wallet</button>
+      </div>
+      <div class="muted">Base URL: /pre-is-the-greatest</div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <input id="tokenContract" placeholder="token contract"/>
+        <input id="tokenSymbol" placeholder="symbol"/>
+        <button onclick="addToken()">Add token whitelist</button>
+      </div>
+    </div>
+
+    <div class="card"><h3>Wallets</h3><table><thead><tr><th>Network</th><th>Address</th><th>Label</th></tr></thead><tbody id="wallets"></tbody></table></div>
+    <div class="card"><h3>Tokens</h3><table><thead><tr><th>Network</th><th>Contract</th><th>Symbol</th></tr></thead><tbody id="tokens"></tbody></table></div>
+    <div class="card"><h3>Transactions (latest)</h3><table><thead><tr><th>Network</th><th>Hash</th><th>Dir</th><th>Amount</th><th>Status</th></tr></thead><tbody id="txs"></tbody></table></div>
+  </main>
+<script>
+const base = '/pre-is-the-greatest';
+async function j(url, opt){ const r = await fetch(base+url, {headers:{'content-type':'application/json'},...opt}); return r.json(); }
+async function load(){
+  const me = await j('/api/me');
+  document.getElementById('who').textContent = me.email ? me.email+' ' : '';
+  document.getElementById('login').style.display = me.email ? 'none':'inline';
+  document.getElementById('logout').style.display = me.email ? 'inline':'none';
+  const wallets = await j('/api/wallets');
+  document.getElementById('wallets').innerHTML = wallets.map(w=>`<tr><td>${w.network}</td><td>${w.address}</td><td>${w.label||''}</td></tr>`).join('');
+  const tokens = await j('/api/tokens');
+  document.getElementById('tokens').innerHTML = tokens.map(t=>`<tr><td>${t.network}</td><td>${t.contract}</td><td>${t.symbol}</td></tr>`).join('');
+  const txs = await j('/api/transactions');
+  document.getElementById('txs').innerHTML = txs.map(t=>`<tr><td>${t.network}</td><td>${t.hash}</td><td>${t.direction}</td><td>${t.amount}</td><td>${t.status}</td></tr>`).join('');
+}
+async function addWallet(){
+  await j('/api/wallets',{method:'POST',body:JSON.stringify({network:network.value,address:address.value,label:label.value})});
+  address.value=''; label.value=''; load();
+}
+async function addToken(){
+  await j('/api/tokens',{method:'POST',body:JSON.stringify({network:network.value,contract:tokenContract.value,symbol:tokenSymbol.value})});
+  tokenContract.value=''; tokenSymbol.value=''; load();
+}
+load();
+</script>
+</body>
+</html>
