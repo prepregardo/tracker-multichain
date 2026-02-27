@@ -15,6 +15,7 @@
     th,td{padding:10px;border-bottom:1px solid #1f2f4d;text-align:left;font-size:14px}
     .card{background:#101a2d;padding:14px;border-radius:12px;margin-bottom:14px}
     .muted{opacity:.8;font-size:12px}
+    .warn{background:#3d2d1a;border:1px solid #c98b2f;color:#ffdba0;padding:10px;border-radius:10px;margin-bottom:12px;display:none}
   </style>
 </head>
 <body>
@@ -22,11 +23,13 @@
     <strong>⚔ pre-is-the-greatest | Multi-chain Tracker (ERC20/TRC20)</strong>
     <div>
       <span id="who"></span>
-      <a id="login" href="/pre-is-the-greatest/auth/google" style="color:#9cc1ff">Login Google</a>
+      <a id="login" href="/pre-is-the-greatest/auth/google" style="color:#9cc1ff;display:none">Login Google</a>
       <a id="logout" href="/pre-is-the-greatest/auth/logout" style="color:#ffb4b4;display:none">Logout</a>
     </div>
   </header>
   <main>
+    <div id="warn" class="warn"></div>
+
     <div class="card">
       <div class="row">
         <select id="network"><option>ERC20</option><option>TRC20</option></select>
@@ -51,27 +54,69 @@
   </main>
 <script>
 const base = '/pre-is-the-greatest';
-async function j(url, opt){ const r = await fetch(base+url, {headers:{'content-type':'application/json'},...opt}); return r.json(); }
+const warnEl = document.getElementById('warn');
+
+function warn(msg){ warnEl.textContent = msg; warnEl.style.display = 'block'; }
+
+async function j(url, opt){
+  const r = await fetch(base+url, {headers:{'content-type':'application/json'},...opt});
+  if (!r.ok) {
+    let body = null;
+    try { body = await r.json(); } catch {}
+    const msg = body?.error || `${r.status} ${r.statusText}`;
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 async function load(){
-  const me = await j('/api/me');
-  document.getElementById('who').textContent = me.email ? me.email+' ' : '';
-  document.getElementById('login').style.display = me.email ? 'none':'inline';
-  document.getElementById('logout').style.display = me.email ? 'inline':'none';
-  const wallets = await j('/api/wallets');
-  document.getElementById('wallets').innerHTML = wallets.map(w=>`<tr><td>${w.network}</td><td>${w.address}</td><td>${w.label||''}</td></tr>`).join('');
-  const tokens = await j('/api/tokens');
-  document.getElementById('tokens').innerHTML = tokens.map(t=>`<tr><td>${t.network}</td><td>${t.contract}</td><td>${t.symbol}</td></tr>`).join('');
-  const txs = await j('/api/transactions');
-  document.getElementById('txs').innerHTML = txs.map(t=>`<tr><td>${t.network}</td><td>${t.hash}</td><td>${t.direction}</td><td>${t.amount}</td><td>${t.status}</td></tr>`).join('');
+  try {
+    const cfg = await j('/api/config');
+    const me = await j('/api/me');
+
+    document.getElementById('who').textContent = me.email ? me.email+' ' : '';
+
+    const loginEl = document.getElementById('login');
+    const logoutEl = document.getElementById('logout');
+
+    if (cfg.googleAuthEnabled) {
+      loginEl.style.display = me.email ? 'none':'inline';
+      logoutEl.style.display = me.email ? 'inline':'none';
+    } else {
+      loginEl.style.display = 'none';
+      logoutEl.style.display = 'none';
+      warn('Google OAuth пока не сконфигурирован на сервере. Приложение работает в локальном режиме без логина.');
+    }
+
+    const wallets = await j('/api/wallets');
+    document.getElementById('wallets').innerHTML = wallets.map(w=>`<tr><td>${w.network}</td><td>${w.address}</td><td>${w.label||''}</td></tr>`).join('');
+
+    const tokens = await j('/api/tokens');
+    document.getElementById('tokens').innerHTML = tokens.map(t=>`<tr><td>${t.network}</td><td>${t.contract}</td><td>${t.symbol}</td></tr>`).join('');
+
+    const txs = await j('/api/transactions');
+    document.getElementById('txs').innerHTML = txs.map(t=>`<tr><td>${t.network||''}</td><td>${t.hash||''}</td><td>${t.direction||''}</td><td>${t.amount||''}</td><td>${t.status||''}</td></tr>`).join('');
+  } catch (e) {
+    warn('Ошибка загрузки данных: ' + e.message);
+  }
 }
+
 async function addWallet(){
-  await j('/api/wallets',{method:'POST',body:JSON.stringify({network:network.value,address:address.value,label:label.value})});
-  address.value=''; label.value=''; load();
+  try {
+    await j('/api/wallets',{method:'POST',body:JSON.stringify({network:network.value,address:address.value,label:label.value})});
+    address.value=''; label.value='';
+    load();
+  } catch (e) { warn('Не удалось добавить кошелёк: ' + e.message); }
 }
+
 async function addToken(){
-  await j('/api/tokens',{method:'POST',body:JSON.stringify({network:network.value,contract:tokenContract.value,symbol:tokenSymbol.value})});
-  tokenContract.value=''; tokenSymbol.value=''; load();
+  try {
+    await j('/api/tokens',{method:'POST',body:JSON.stringify({network:network.value,contract:tokenContract.value,symbol:tokenSymbol.value})});
+    tokenContract.value=''; tokenSymbol.value='';
+    load();
+  } catch (e) { warn('Не удалось добавить токен: ' + e.message); }
 }
+
 load();
 </script>
 </body>
