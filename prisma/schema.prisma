@@ -3,23 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-enum Role {
-  ADMIN
-  VIEWER
-}
-
-enum Network {
-  ERC20
-  TRC20
-}
-
-enum TxDirection {
-  IN
-  OUT
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model User {
@@ -27,7 +12,7 @@ model User {
   email         String    @unique
   name          String?
   image         String?
-  role          Role      @default(VIEWER)
+  role          String    @default("VIEWER")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -73,7 +58,7 @@ model VerificationToken {
 
 model Wallet {
   id        String   @id @default(cuid())
-  network   Network
+  network   String
   address   String
   label     String?
   createdAt DateTime @default(now())
@@ -84,7 +69,7 @@ model Wallet {
 
 model Token {
   id        String   @id @default(cuid())
-  network   Network
+  network   String
   contract  String
   symbol    String
   decimals  Int      @default(18)
@@ -94,18 +79,18 @@ model Token {
 }
 
 model Transaction {
-  id          String      @id @default(cuid())
-  network     Network
+  id          String   @id @default(cuid())
+  network     String
   hash        String
   wallet      String
   token       String?
-  direction   TxDirection
+  direction   String
   amount      String
   timestamp   DateTime
   blockNumber Int
   fee         String?
-  status      String      @default("confirmed")
-  createdAt   DateTime    @default(now())
+  status      String   @default("confirmed")
+  createdAt   DateTime @default(now())
 
   @@unique([network, hash, wallet])
   @@index([wallet, network])
@@ -113,10 +98,10 @@ model Transaction {
 }
 
 model Reconciliation {
-  id            String   @id @default(cuid())
-  wallet        String
-  network       Network
-  token         String?
+  id              String   @id @default(cuid())
+  wallet          String
+  network         String
+  token           String?
   expectedBalance String
   actualBalance   String
   difference      String
