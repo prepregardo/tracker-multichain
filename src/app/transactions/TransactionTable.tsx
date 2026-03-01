@@ -24,6 +24,104 @@ interface Wallet {
   network: string
 }
 
+function SyncModal({
+  open,
+  onClose,
+  logs,
+  progress,
+  syncing,
+}: {
+  open: boolean
+  onClose: () => void
+  logs: string[]
+  progress: { current: number; total: number }
+  syncing: boolean
+}) {
+  const logEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs])
+
+  if (!open) return null
+
+  const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-2xl mx-4 rounded-xl border border-gray-700 bg-gray-900 shadow-2xl flex flex-col max-h-[80vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+          <h2 className="text-lg font-semibold text-white">
+            {syncing ? 'Syncing Transactions...' : 'Sync Complete'}
+          </h2>
+          {!syncing && (
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white transition-colors text-xl leading-none px-2"
+            >
+              \u00d7
+            </button>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-b border-gray-800">
+          <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
+            <span>Progress</span>
+            <span>
+              {progress.current} / {progress.total} wallets \u00b7 {pct}%
+            </span>
+          </div>
+          <div className="w-full h-3 bg-gray-800 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-300 ease-out"
+              style={{
+                width: `${pct}%`,
+                background: syncing
+                  ? 'linear-gradient(90deg, #6366f1, #818cf8)'
+                  : pct === 100
+                  ? 'linear-gradient(90deg, #22c55e, #4ade80)'
+                  : 'linear-gradient(90deg, #6366f1, #818cf8)',
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 min-h-[200px] max-h-[400px]">
+          <div className="font-mono text-xs leading-relaxed space-y-1">
+            {logs.map((line, i) => (
+              <div
+                key={i}
+                className={
+                  line.includes('ERROR')
+                    ? 'text-red-400'
+                    : line.includes('Sync complete')
+                    ? 'text-green-400 font-semibold'
+                    : line.includes('Starting') || line.includes('Syncing')
+                    ? 'text-brand-400'
+                    : 'text-gray-400'
+                }
+              >
+                {line}
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-800 flex justify-end">
+          <button
+            onClick={onClose}
+            disabled={syncing}
+            className={syncing ? 'btn-secondary opacity-50 cursor-not-allowed' : 'btn-primary'}
+          >
+            {syncing ? 'Please wait...' : 'Close'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function TransactionTable({
   transactions,
   wallets,
@@ -35,6 +133,9 @@ export default function TransactionTable({
   const [filterNetwork, setFilterNetwork] = useState<string>('ALL')
   const [filterDirection, setFilterDirection] = useState<string>('ALL')
   const [syncing, setSyncing] = useState(false)
+  const [syncModalOpen, setSyncModalOpen] = useState(false)
+  const [syncLogs, setSyncLogs] = useState<string[]>([])
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 })
 
   const filtered = transactions.filter((tx) => {
     if (filterNetwork !== 'ALL' && tx.network !== filterNetwork) return false
@@ -42,22 +143,83 @@ export default function TransactionTable({
     return true
   })
 
-  async function handleSync() {
+  const handleSync = useCallback(async () => {
     setSyncing(true)
+    setSyncModalOpen(true)
+    setSyncLogs([])
+    setSyncProgress({ current: 0, total: 0 })
+
     try {
       const res = await fetch('/api/transactions/sync', { method: 'POST' })
-      if (res.ok) router.refresh()
-      else {
-        const data = await res.json()
-        alert(data.error || 'Sync failed')
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSyncLogs((prev) => [...prev, `ERROR: ${data.error || res.statusText}`])
+        setSyncing(false)
+        return
       }
-    } finally {
-      setSyncing(false)
+
+      const reader = res.body?.getReader()
+      if (!reader) {
+        setSyncLogs((prev) => [...prev, 'ERROR: No response stream'])
+        setSyncing(false)
+        return
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        let currentEvent = ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
+            const rawData = line.slice(6)
+            try {
+              const data = JSON.parse(rawData)
+              if (currentEvent === 'log') {
+                setSyncLogs((prev) => [...prev, data.message])
+              } else if (currentEvent === 'progress') {
+                setSyncProgress({ current: data.current, total: data.total })
+              } else if (currentEvent === 'done') {
+                if (data.ok) {
+                  router.refresh()
+                }
+              }
+            } catch {}
+            currentEvent = ''
+          }
+        }
+      }
+    } catch (e: any) {
+      setSyncLogs((prev) => [...prev, `ERROR: ${e.message}`])
     }
+
+    setSyncing(false)
+  }, [router])
+
+  function handleCloseModal() {
+    setSyncModalOpen(false)
   }
 
   return (
     <>
+      <SyncModal
+        open={syncModalOpen}
+        onClose={handleCloseModal}
+        logs={syncLogs}
+        progress={syncProgress}
+        syncing={syncing}
+      />
+
       <div className="flex flex-wrap items-center gap-3">
         <button onClick={handleSync} disabled={syncing} className="btn-primary">
           {syncing ? 'Syncing...' : 'Sync Transactions'}
