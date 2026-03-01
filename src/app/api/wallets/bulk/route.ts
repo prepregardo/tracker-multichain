@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Check for duplicates in the input
-      const uniqueAddresses = [...new Set(cleanAddresses)]
+      const uniqueAddresses = Array.from(new Set(cleanAddresses))
 
       // Find existing wallets to skip them
       const existing = await prisma.wallet.findMany({
