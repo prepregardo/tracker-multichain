@@ -21,11 +21,11 @@ export default function BalancesView() {
   const [loading, setLoading] = useState(false)
   const [initLoading, setInitLoading] = useState(true)
   const [loaded, setLoaded] = useState(false)
+  const [progress, setProgress] = useState({ current: 0, total: 0 })
   const [filterNetwork, setFilterNetwork] = useState('')
   const [filterToken, setFilterToken] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  // Load wallet/token counts on mount via client-side API calls
   useEffect(() => {
     async function loadCounts() {
       try {
@@ -53,16 +53,31 @@ export default function BalancesView() {
   const fetchBalances = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setBalances([])
+    setProgress({ current: 0, total: 0 })
+
     try {
-      const res = await fetch('/api/balances')
-      if (res.ok) {
+      let page = 0
+      let allResults: BalanceRow[] = []
+
+      while (true) {
+        const res = await fetch(`/api/balances?page=${page}`)
+        if (!res.ok) {
+          const data = await res.json().catch(() => null)
+          setError(data?.error || `Server error: ${res.status}`)
+          break
+        }
+
         const data = await res.json()
-        setBalances(data)
-        setLoaded(true)
-      } else {
-        const data = await res.json().catch(() => null)
-        setError(data?.error || `Server error: ${res.status}`)
+        allResults = [...allResults, ...data.results]
+        setBalances(allResults)
+        setProgress({ current: page + 1, total: data.totalPages })
+
+        if (data.done) break
+        page++
       }
+
+      setLoaded(true)
     } catch (e: any) {
       setError(e.message || 'Network error')
     } finally {
@@ -106,7 +121,6 @@ export default function BalancesView() {
 
   return (
     <>
-      {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card">
           <p className="text-sm text-gray-500">Wallets</p>
@@ -123,7 +137,7 @@ export default function BalancesView() {
         </div>
         <div className="card">
           <p className="text-sm text-gray-500">Non-zero Balances</p>
-          <p className="text-2xl font-bold text-white">{loaded ? nonZero.length : '—'}</p>
+          <p className="text-2xl font-bold text-white">{loaded || balances.length > 0 ? nonZero.length : '—'}</p>
         </div>
       </div>
 
@@ -131,12 +145,26 @@ export default function BalancesView() {
         <button onClick={fetchBalances} disabled={loading} className="btn-primary">
           {loading ? 'Loading...' : loaded ? 'Refresh Balances' : 'Fetch Balances'}
         </button>
-        {loaded && errors.length > 0 && (
+        {loading && progress.total > 0 && (
+          <span className="text-sm text-gray-400">
+            Page {progress.current}/{progress.total} ({balances.length} results)
+          </span>
+        )}
+        {!loading && loaded && errors.length > 0 && (
           <span className="text-sm text-red-400">
             {errors.length} error(s)
           </span>
         )}
       </div>
+
+      {loading && progress.total > 0 && (
+        <div className="w-full bg-gray-800 rounded-full h-2">
+          <div
+            className="bg-brand-600 h-2 rounded-full transition-all duration-300"
+            style={{ width: `${(progress.current / progress.total) * 100}%` }}
+          />
+        </div>
+      )}
 
       {error && (
         <div className="card border border-red-500/30 bg-red-500/5">
@@ -169,20 +197,20 @@ export default function BalancesView() {
         </div>
       )}
 
-      {!loaded && !error ? (
+      {!loaded && !loading && !error ? (
         <div className="card text-center py-12">
           <p className="text-gray-500">
             Click &quot;Fetch Balances&quot; to load real-time balances from blockchain.
           </p>
           <p className="text-gray-600 text-sm mt-2">
-            Will check {walletCount} wallet(s) &times; {(tokenCount ?? 0) + 1} token(s) (including native)
+            {walletCount} wallet(s) &times; {tokenCount ?? 0} token(s)
           </p>
         </div>
-      ) : filtered.length === 0 && loaded ? (
+      ) : (filtered.length === 0 && loaded) ? (
         <div className="card text-center py-12">
           <p className="text-gray-500">No balances found matching filters.</p>
         </div>
-      ) : loaded ? (
+      ) : (balances.length > 0) ? (
         <div className="card overflow-hidden p-0">
           <div className="overflow-x-auto">
             <table className="w-full">

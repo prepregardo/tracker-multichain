@@ -1,10 +1,8 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-guard'
 import { getERC20Balance } from '@/lib/providers/etherscan'
 import { getTRC20Balance } from '@/lib/providers/trongrid'
-
-export const maxDuration = 60
 
 // Known decimals fallback (lowercase contract → decimals)
 const KNOWN_DECIMALS: Record<string, number> = {
@@ -22,113 +20,84 @@ function getDecimals(contract: string, dbDecimals: number): number {
   return dbDecimals
 }
 
-interface BalanceTask {
-  wallet: string
-  walletLabel: string | null
-  network: string
-  token: string
-  contract: string | null
-  decimals: number
-  fetchFn: () => Promise<string>
-}
+const PAGE_SIZE = 5 // 5 wallets per page × 2 tokens = 10 API calls, ~3 sec
 
-// Process tasks in batches with delay between batches (Etherscan: 5 calls/sec)
-async function processBatched(tasks: BalanceTask[], batchSize = 4, delayMs = 250) {
-  const results: {
-    wallet: string
-    walletLabel: string | null
-    network: string
-    token: string
-    contract: string | null
-    decimals: number
-    balance: string
-  }[] = []
-
-  for (let i = 0; i < tasks.length; i += batchSize) {
-    const batch = tasks.slice(i, i + batchSize)
-    const batchResults = await Promise.allSettled(
-      batch.map(async (task) => {
-        const balance = await task.fetchFn()
-        return {
-          wallet: task.wallet,
-          walletLabel: task.walletLabel,
-          network: task.network,
-          token: task.token,
-          contract: task.contract,
-          decimals: task.decimals,
-          balance,
-        }
-      })
-    )
-
-    for (let j = 0; j < batchResults.length; j++) {
-      const r = batchResults[j]
-      if (r.status === 'fulfilled') {
-        results.push(r.value)
-      } else {
-        results.push({
-          wallet: batch[j].wallet,
-          walletLabel: batch[j].walletLabel,
-          network: batch[j].network,
-          token: batch[j].token,
-          contract: batch[j].contract,
-          decimals: batch[j].decimals,
-          balance: 'error',
-        })
-      }
-    }
-
-    // Rate limit: wait between batches
-    if (i + batchSize < tasks.length) {
-      await new Promise((r) => setTimeout(r, delayMs))
-    }
-  }
-
-  return results
-}
-
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
   if (error) return error
 
+  const page = parseInt(req.nextUrl.searchParams.get('page') || '0', 10)
+
   try {
     const [wallets, tokens] = await Promise.all([
-      prisma.wallet.findMany(),
+      prisma.wallet.findMany({ orderBy: { createdAt: 'asc' } }),
       prisma.token.findMany(),
     ])
 
-    if (wallets.length === 0) {
-      return NextResponse.json([])
+    const totalPages = Math.ceil(wallets.length / PAGE_SIZE)
+    const pageWallets = wallets.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+
+    if (pageWallets.length === 0) {
+      return NextResponse.json({ results: [], page, totalPages, done: true })
     }
 
-    // Build all tasks upfront, then process in batches
-    const tasks: BalanceTask[] = []
+    const results: {
+      wallet: string
+      walletLabel: string | null
+      network: string
+      token: string
+      contract: string | null
+      decimals: number
+      balance: string
+    }[] = []
 
-    for (const wallet of wallets) {
-      // Token balances only (skip native ETH/TRX — focus on USDT/USDC)
+    // Process wallets in this page with parallel requests per wallet
+    const walletPromises = pageWallets.map(async (wallet) => {
       const walletTokens = tokens.filter((t) => t.network === wallet.network)
+      const walletResults: typeof results = []
+
       for (const token of walletTokens) {
-        tasks.push({
-          wallet: wallet.address,
-          walletLabel: wallet.label,
-          network: wallet.network,
-          token: token.symbol,
-          contract: token.contract,
-          decimals: getDecimals(token.contract, token.decimals),
-          fetchFn: () =>
-            wallet.network === 'ERC20'
-              ? getERC20Balance(wallet.address, token.contract)
-              : getTRC20Balance(wallet.address, token.contract),
-        })
+        try {
+          const balance = wallet.network === 'ERC20'
+            ? await getERC20Balance(wallet.address, token.contract)
+            : await getTRC20Balance(wallet.address, token.contract)
+
+          walletResults.push({
+            wallet: wallet.address,
+            walletLabel: wallet.label,
+            network: wallet.network,
+            token: token.symbol,
+            contract: token.contract,
+            decimals: getDecimals(token.contract, token.decimals),
+            balance,
+          })
+        } catch {
+          walletResults.push({
+            wallet: wallet.address,
+            walletLabel: wallet.label,
+            network: wallet.network,
+            token: token.symbol,
+            contract: token.contract,
+            decimals: getDecimals(token.contract, token.decimals),
+            balance: 'error',
+          })
+        }
       }
+
+      return walletResults
+    })
+
+    const allResults = await Promise.all(walletPromises)
+    for (const wr of allResults) {
+      results.push(...wr)
     }
 
-    if (tasks.length === 0) {
-      return NextResponse.json([])
-    }
-
-    const results = await processBatched(tasks)
-    return NextResponse.json(results)
+    return NextResponse.json({
+      results,
+      page,
+      totalPages,
+      done: page + 1 >= totalPages,
+    })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch balances' }, { status: 500 })
   }
