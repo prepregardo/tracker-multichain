@@ -4,6 +4,23 @@ import { requireAuth } from '@/lib/auth-guard'
 import { getERC20Balance } from '@/lib/providers/etherscan'
 import { getTRC20Balance } from '@/lib/providers/trongrid'
 
+// Known decimals fallback (lowercase contract → decimals)
+const KNOWN_DECIMALS: Record<string, number> = {
+  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 6,  // USDC
+  '0xdac17f958d2ee523a2206206994597c13d831ec7': 6,  // USDT
+  '0x6b175474e89094c44da98b954eedeac495271d0f': 18, // DAI
+  '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': 8,  // WBTC
+  'tr7nhqjekqxgtci8q8zy4pl8otszgjlj6t': 6,           // USDT (TRON)
+  'teg2uynjbej5sqhahxmudag8fmtod7v8ss': 6,           // USDC (TRON)
+}
+
+function getDecimals(contract: string, dbDecimals: number): number {
+  const known = KNOWN_DECIMALS[contract.toLowerCase()]
+  // If DB has default 18 but we know the real value, use the known one
+  if (known !== undefined && dbDecimals === 18 && known !== 18) return known
+  return dbDecimals
+}
+
 export async function GET() {
   const { error } = await requireAuth()
   if (error) return error
@@ -74,7 +91,7 @@ export async function GET() {
             network: wallet.network,
             token: token.symbol,
             contract: token.contract,
-            decimals: token.decimals,
+            decimals: getDecimals(token.contract, token.decimals),
             balance,
           })
         } catch {
@@ -84,7 +101,7 @@ export async function GET() {
             network: wallet.network,
             token: token.symbol,
             contract: token.contract,
-            decimals: token.decimals,
+            decimals: getDecimals(token.contract, token.decimals),
             balance: 'error',
           })
         }

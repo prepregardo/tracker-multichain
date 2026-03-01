@@ -61,11 +61,33 @@ export default function TokenList({ initialTokens }: { initialTokens: Token[] })
     if (res.ok) router.refresh()
   }
 
+  async function handleFixDecimals() {
+    const res = await fetch('/api/tokens', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      alert(`Fixed ${data.fixed} of ${data.total} token(s)`)
+      router.refresh()
+    } else {
+      alert('Failed to fix decimals')
+    }
+  }
+
   return (
     <>
-      <button onClick={() => setShowForm(!showForm)} className="btn-primary">
-        {showForm ? 'Cancel' : 'Add Token'}
-      </button>
+      <div className="flex gap-3">
+        <button onClick={() => setShowForm(!showForm)} className="btn-primary">
+          {showForm ? 'Cancel' : 'Add Token'}
+        </button>
+        {initialTokens.length > 0 && (
+          <button onClick={handleFixDecimals} className="btn-secondary">
+            Fix Decimals
+          </button>
+        )}
+      </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} className="card max-w-lg space-y-4">
