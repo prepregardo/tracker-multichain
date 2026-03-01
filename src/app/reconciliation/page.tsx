@@ -3,7 +3,7 @@ import ReconciliationView from './ReconciliationView'
 
 export const dynamic = 'force-dynamic'
 
-export default async function BalancesPage() {
+export default async function ReconciliationPage() {
   let records: any[] = []
   let wallets: any[] = []
   let tokens: any[] = []
@@ -29,7 +29,7 @@ export default async function BalancesPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Balances</h1>
+        <h1 className="text-2xl font-bold text-white">Reconciliation</h1>
       </div>
       <ReconciliationView records={records} wallets={wallets} tokens={tokens} />
     </div>

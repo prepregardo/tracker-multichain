@@ -16,7 +16,7 @@ export default function Header() {
 
         {status === 'unauthenticated' && (
           <button
-            onClick={() => signIn('google')}
+            onClick={() => signIn()}
             className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
           >
             Sign in
