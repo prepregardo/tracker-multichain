@@ -91,8 +91,8 @@ export default function BalancesView() {
     return true
   })
 
-  const networks = [...new Set(balances.map((b) => b.network))]
-  const tokenSymbols = [...new Set(balances.map((b) => b.token))]
+  const networks = Array.from(new Set(balances.map((b) => b.network)))
+  const tokenSymbols = Array.from(new Set(balances.map((b) => b.token)))
 
   const nonZero = filtered.filter((b) => b.balance !== '0' && b.balance !== 'error')
   const errors = filtered.filter((b) => b.balance === 'error')

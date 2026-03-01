@@ -65,7 +65,6 @@ export async function POST(req: NextRequest) {
                                       address,
                                       label: null,
                           })),
-                          skipDuplicates: true,
                 })
                 created = result.count
         }
