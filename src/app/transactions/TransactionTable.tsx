@@ -59,7 +59,7 @@ function SyncModal({
               onClick={onClose}
               className="text-gray-400 hover:text-white transition-colors text-xl leading-none px-2"
             >
-              \u00d7
+              {'\u00d7'}
             </button>
           )}
         </div>
@@ -68,7 +68,7 @@ function SyncModal({
           <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
             <span>Progress</span>
             <span>
-              {progress.current} / {progress.total} wallets \u00b7 {pct}%
+              {progress.current} / {progress.total} pages {'\u00b7'} {pct}%
             </span>
           </div>
           <div className="w-full h-3 bg-gray-800 rounded-full overflow-hidden">
@@ -94,10 +94,12 @@ function SyncModal({
                 className={
                   line.includes('ERROR')
                     ? 'text-red-400'
-                    : line.includes('Sync complete')
+                    : line.includes('complete') || line.includes('Total:')
                     ? 'text-green-400 font-semibold'
                     : line.includes('Starting') || line.includes('Syncing')
                     ? 'text-brand-400'
+                    : line.includes('Found')
+                    ? 'text-gray-300'
                     : 'text-gray-400'
                 }
               >
@@ -149,55 +151,40 @@ export default function TransactionTable({
     setSyncLogs([])
     setSyncProgress({ current: 0, total: 0 })
 
+    let page = 0
+    let totalSynced = 0
+    let hasError = false
+
     try {
-      const res = await fetch('/api/transactions/sync', { method: 'POST' })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        setSyncLogs((prev) => [...prev, `ERROR: ${data.error || res.statusText}`])
-        setSyncing(false)
-        return
-      }
-
-      const reader = res.body?.getReader()
-      if (!reader) {
-        setSyncLogs((prev) => [...prev, 'ERROR: No response stream'])
-        setSyncing(false)
-        return
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-
       while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+        const res = await fetch(`/api/transactions/sync?page=${page}`, { method: 'POST' })
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        let currentEvent = ''
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim()
-          } else if (line.startsWith('data: ')) {
-            const rawData = line.slice(6)
-            try {
-              const data = JSON.parse(rawData)
-              if (currentEvent === 'log') {
-                setSyncLogs((prev) => [...prev, data.message])
-              } else if (currentEvent === 'progress') {
-                setSyncProgress({ current: data.current, total: data.total })
-              } else if (currentEvent === 'done') {
-                if (data.ok) {
-                  router.refresh()
-                }
-              }
-            } catch {}
-            currentEvent = ''
-          }
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          const errLogs = data.logs || [`ERROR: ${data.error || res.statusText}`]
+          setSyncLogs((prev) => [...prev, ...errLogs])
+          hasError = true
+          break
         }
+
+        const data = await res.json()
+
+        // Append logs from this page
+        if (data.logs && data.logs.length > 0) {
+          setSyncLogs((prev) => [...prev, ...data.logs])
+        }
+
+        totalSynced += data.synced || 0
+        setSyncProgress({ current: page + 1, total: data.totalPages })
+
+        if (data.done) break
+        page++
+      }
+
+      // Final summary
+      if (!hasError) {
+        setSyncLogs((prev) => [...prev, `Sync complete. Total: ${totalSynced} transactions.`])
+        router.refresh()
       }
     } catch (e: any) {
       setSyncLogs((prev) => [...prev, `ERROR: ${e.message}`])

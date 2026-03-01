@@ -1,5 +1,7 @@
 const ETHERSCAN_BASE = 'https://api.etherscan.io/v2/api'
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 interface EtherscanTx {
   hash: string
   from: string
@@ -13,6 +15,41 @@ interface EtherscanTx {
   tokenSymbol?: string
   tokenDecimal?: string
   contractAddress?: string
+}
+
+async function etherscanFetch(params: URLSearchParams, retries = 3): Promise<any> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(`${ETHERSCAN_BASE}?${params}`)
+    const data = await res.json()
+
+    if (data.status === '1') return data
+
+    const msg = (data.message || '').toLowerCase()
+    const resultMsg = (typeof data.result === 'string' ? data.result : '').toLowerCase()
+
+    const isRateLimit = msg.includes('rate limit') || resultMsg.includes('rate limit')
+      || msg.includes('max calls') || resultMsg.includes('max rate')
+
+    if (isRateLimit && attempt < retries) {
+      const delay = 1000 * (attempt + 1) // 1s, 2s, 3s
+      await sleep(delay)
+      continue
+    }
+
+    // Not a rate limit or retries exhausted — throw with Etherscan's message
+    const errorDetail = typeof data.result === 'string' ? data.result : data.message
+    if (isRateLimit) {
+      throw new Error(`Rate limit: ${errorDetail}`)
+    }
+
+    // "No transactions found" is not an error
+    if (msg === 'no transactions found' || resultMsg === 'no transactions found'
+      || msg.includes('no transactions') || data.message === 'No transactions found') {
+      return { status: '1', result: [] }
+    }
+
+    throw new Error(`Etherscan: ${errorDetail || 'Unknown error'}`)
+  }
 }
 
 export async function getERC20Transactions(
@@ -41,16 +78,8 @@ export async function getERC20Transactions(
     params.set('contractaddress', contractAddress)
   }
 
-  const res = await fetch(`${ETHERSCAN_BASE}?${params}`)
-  const data = await res.json()
-
-  if (data.status !== '1') {
-    // Log the error for debugging but don't throw
-    console.error('Etherscan API error:', data.message, data.result)
-    return []
-  }
-
-  return data.result as EtherscanTx[]
+  const data = await etherscanFetch(params)
+  return (data.result || []) as EtherscanTx[]
 }
 
 export async function getERC20Balance(
@@ -73,10 +102,6 @@ export async function getERC20Balance(
     params.set('contractaddress', contractAddress)
   }
 
-  const res = await fetch(`${ETHERSCAN_BASE}?${params}`)
-  const data = await res.json()
-
-  if (data.status !== '1') return '0'
-
+  const data = await etherscanFetch(params)
   return data.result
 }
