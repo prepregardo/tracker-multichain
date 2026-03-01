@@ -1,23 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { shortenAddress, formatAmount, addressExplorerUrl } from '@/lib/utils'
-
-interface WalletInfo {
-  id: string
-  address: string
-  label: string | null
-  network: string
-}
-
-interface TokenInfo {
-  id: string
-  contract: string
-  symbol: string
-  decimals: number
-  network: string
-}
 
 interface BalanceRow {
   wallet: string
@@ -29,23 +14,45 @@ interface BalanceRow {
   balance: string
 }
 
-interface Props {
-  wallets: WalletInfo[]
-  tokens: TokenInfo[]
-}
-
-export default function BalancesView({ wallets, tokens }: Props) {
+export default function BalancesView() {
+  const [walletCount, setWalletCount] = useState<number | null>(null)
+  const [tokenCount, setTokenCount] = useState<number | null>(null)
   const [balances, setBalances] = useState<BalanceRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [initLoading, setInitLoading] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [filterNetwork, setFilterNetwork] = useState('')
   const [filterToken, setFilterToken] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
-  const hasWallets = wallets.length > 0
-  const hasTokens = tokens.length > 0
+  // Load wallet/token counts on mount via client-side API calls
+  useEffect(() => {
+    async function loadCounts() {
+      try {
+        const [walletsRes, tokensRes] = await Promise.all([
+          fetch('/api/wallets'),
+          fetch('/api/tokens'),
+        ])
+        if (walletsRes.ok) {
+          const w = await walletsRes.json()
+          setWalletCount(Array.isArray(w) ? w.length : 0)
+        }
+        if (tokensRes.ok) {
+          const t = await tokensRes.json()
+          setTokenCount(Array.isArray(t) ? t.length : 0)
+        }
+      } catch {
+        // ignore
+      } finally {
+        setInitLoading(false)
+      }
+    }
+    loadCounts()
+  }, [])
 
-  async function fetchBalances() {
+  const fetchBalances = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const res = await fetch('/api/balances')
       if (res.ok) {
@@ -54,12 +61,14 @@ export default function BalancesView({ wallets, tokens }: Props) {
         setLoaded(true)
       } else {
         const data = await res.json().catch(() => null)
-        alert(data?.error || 'Failed to fetch balances')
+        setError(data?.error || `Server error: ${res.status}`)
       }
+    } catch (e: any) {
+      setError(e.message || 'Network error')
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   const filtered = balances.filter((b) => {
     if (filterNetwork && b.network !== filterNetwork) return false
@@ -73,11 +82,17 @@ export default function BalancesView({ wallets, tokens }: Props) {
   const nonZero = filtered.filter((b) => b.balance !== '0' && b.balance !== 'error')
   const errors = filtered.filter((b) => b.balance === 'error')
 
-  // Show setup hints if no wallets or tokens
-  if (!hasWallets) {
+  if (initLoading) {
+    return (
+      <div className="card text-center py-12">
+        <p className="text-gray-500">Loading...</p>
+      </div>
+    )
+  }
+
+  if (walletCount === 0) {
     return (
       <div className="card text-center py-16 space-y-4">
-        <div className="text-4xl mb-2">📭</div>
         <p className="text-gray-400 text-lg">No wallets added yet</p>
         <p className="text-gray-500 text-sm">
           Add wallets first, then come back to check balances.
@@ -95,12 +110,12 @@ export default function BalancesView({ wallets, tokens }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card">
           <p className="text-sm text-gray-500">Wallets</p>
-          <p className="text-2xl font-bold text-white">{wallets.length}</p>
+          <p className="text-2xl font-bold text-white">{walletCount ?? '—'}</p>
         </div>
         <div className="card">
           <p className="text-sm text-gray-500">Tokens</p>
-          <p className="text-2xl font-bold text-white">{tokens.length}</p>
-          {!hasTokens && (
+          <p className="text-2xl font-bold text-white">{tokenCount ?? '—'}</p>
+          {tokenCount === 0 && (
             <Link href="/tokens" className="text-xs text-brand-400 hover:underline">
               Add tokens
             </Link>
@@ -122,6 +137,12 @@ export default function BalancesView({ wallets, tokens }: Props) {
           </span>
         )}
       </div>
+
+      {error && (
+        <div className="card border border-red-500/30 bg-red-500/5">
+          <p className="text-red-400 text-sm">{error}</p>
+        </div>
+      )}
 
       {loaded && balances.length > 0 && (
         <div className="flex gap-3">
@@ -148,20 +169,20 @@ export default function BalancesView({ wallets, tokens }: Props) {
         </div>
       )}
 
-      {!loaded ? (
+      {!loaded && !error ? (
         <div className="card text-center py-12">
           <p className="text-gray-500">
             Click &quot;Fetch Balances&quot; to load real-time balances from blockchain.
           </p>
           <p className="text-gray-600 text-sm mt-2">
-            Will check {wallets.length} wallet(s) × {tokens.length + 1} token(s) (including native)
+            Will check {walletCount} wallet(s) &times; {(tokenCount ?? 0) + 1} token(s) (including native)
           </p>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 && loaded ? (
         <div className="card text-center py-12">
           <p className="text-gray-500">No balances found matching filters.</p>
         </div>
-      ) : (
+      ) : loaded ? (
         <div className="card overflow-hidden p-0">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -232,7 +253,7 @@ export default function BalancesView({ wallets, tokens }: Props) {
             </table>
           </div>
         </div>
-      )}
+      ) : null}
     </>
   )
 }
