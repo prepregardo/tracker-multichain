@@ -98,6 +98,20 @@ model Transaction {
   @@index([timestamp])
 }
 
+model Balance {
+  id        String   @id @default(cuid())
+  network   String
+  wallet    String
+  token     String
+  contract  String
+  decimals  Int      @default(18)
+  balance   String
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, wallet, contract])
+  @@index([wallet])
+}
+
 model Reconciliation {
   id              String   @id @default(cuid())
   wallet          String

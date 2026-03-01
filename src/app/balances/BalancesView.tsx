@@ -12,6 +12,7 @@ interface BalanceRow {
   contract: string | null
   decimals: number
   balance: string
+  updatedAt?: string
 }
 
 export default function BalancesView() {
@@ -25,13 +26,16 @@ export default function BalancesView() {
   const [filterNetwork, setFilterNetwork] = useState('')
   const [filterToken, setFilterToken] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
 
+  // Load cached balances + counts on mount
   useEffect(() => {
-    async function loadCounts() {
+    async function init() {
       try {
-        const [walletsRes, tokensRes] = await Promise.all([
+        const [walletsRes, tokensRes, balancesRes] = await Promise.all([
           fetch('/api/wallets'),
           fetch('/api/tokens'),
+          fetch('/api/balances'),
         ])
         if (walletsRes.ok) {
           const w = await walletsRes.json()
@@ -41,15 +45,30 @@ export default function BalancesView() {
           const t = await tokensRes.json()
           setTokenCount(Array.isArray(t) ? t.length : 0)
         }
+        if (balancesRes.ok) {
+          const data = await balancesRes.json()
+          if (data.results && data.results.length > 0) {
+            setBalances(data.results)
+            setLoaded(true)
+            // Find most recent updatedAt
+            const dates = data.results
+              .map((r: BalanceRow) => r.updatedAt)
+              .filter(Boolean)
+            if (dates.length > 0) {
+              setLastUpdated(new Date(Math.max(...dates.map((d: string) => new Date(d).getTime()))).toLocaleString())
+            }
+          }
+        }
       } catch {
         // ignore
       } finally {
         setInitLoading(false)
       }
     }
-    loadCounts()
+    init()
   }, [])
 
+  // Refresh from blockchain
   const fetchBalances = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -61,7 +80,7 @@ export default function BalancesView() {
       let allResults: BalanceRow[] = []
 
       while (true) {
-        const res = await fetch(`/api/balances?page=${page}`)
+        const res = await fetch(`/api/balances?refresh=true&page=${page}`)
         if (!res.ok) {
           const data = await res.json().catch(() => null)
           setError(data?.error || `Server error: ${res.status}`)
@@ -78,6 +97,7 @@ export default function BalancesView() {
       }
 
       setLoaded(true)
+      setLastUpdated(new Date().toLocaleString())
     } catch (e: any) {
       setError(e.message || 'Network error')
     } finally {
@@ -143,11 +163,16 @@ export default function BalancesView() {
 
       <div className="flex items-center gap-4 flex-wrap">
         <button onClick={fetchBalances} disabled={loading} className="btn-primary">
-          {loading ? 'Loading...' : loaded ? 'Refresh Balances' : 'Fetch Balances'}
+          {loading ? 'Loading...' : 'Refresh Balances'}
         </button>
         {loading && progress.total > 0 && (
           <span className="text-sm text-gray-400">
             Page {progress.current}/{progress.total} ({balances.length} results)
+          </span>
+        )}
+        {!loading && lastUpdated && (
+          <span className="text-sm text-gray-500">
+            Updated: {lastUpdated}
           </span>
         )}
         {!loading && loaded && errors.length > 0 && (
@@ -200,7 +225,7 @@ export default function BalancesView() {
       {!loaded && !loading && !error ? (
         <div className="card text-center py-12">
           <p className="text-gray-500">
-            Click &quot;Fetch Balances&quot; to load real-time balances from blockchain.
+            Click &quot;Refresh Balances&quot; to load real-time balances from blockchain.
           </p>
           <p className="text-gray-600 text-sm mt-2">
             {walletCount} wallet(s) &times; {tokenCount ?? 0} token(s)

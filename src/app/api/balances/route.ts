@@ -20,15 +20,44 @@ function getDecimals(contract: string, dbDecimals: number): number {
   return dbDecimals
 }
 
-const PAGE_SIZE = 5 // 5 wallets per page × 2 tokens = 10 API calls, ~3 sec
+const PAGE_SIZE = 5
 
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
   if (error) return error
 
+  const refresh = req.nextUrl.searchParams.get('refresh') === 'true'
   const page = parseInt(req.nextUrl.searchParams.get('page') || '0', 10)
 
   try {
+    // No refresh — return cached balances from DB
+    if (!refresh) {
+      const cached = await prisma.balance.findMany({
+        orderBy: { updatedAt: 'desc' },
+      })
+
+      // Enrich with wallet labels
+      const walletAddresses = [...new Set(cached.map((b) => b.wallet))]
+      const wallets = await prisma.wallet.findMany({
+        where: { address: { in: walletAddresses } },
+      })
+      const labelMap = new Map(wallets.map((w) => [w.address, w.label]))
+
+      const results = cached.map((b) => ({
+        wallet: b.wallet,
+        walletLabel: labelMap.get(b.wallet) || null,
+        network: b.network,
+        token: b.token,
+        contract: b.contract,
+        decimals: b.decimals,
+        balance: b.balance,
+        updatedAt: b.updatedAt,
+      }))
+
+      return NextResponse.json({ results, cached: true, done: true })
+    }
+
+    // Refresh mode — fetch from blockchain and save to DB
     const [wallets, tokens] = await Promise.all([
       prisma.wallet.findMany({ orderBy: { createdAt: 'asc' } }),
       prisma.token.findMany(),
@@ -51,16 +80,37 @@ export async function GET(req: NextRequest) {
       balance: string
     }[] = []
 
-    // Process wallets in this page with parallel requests per wallet
     const walletPromises = pageWallets.map(async (wallet) => {
       const walletTokens = tokens.filter((t) => t.network === wallet.network)
       const walletResults: typeof results = []
 
       for (const token of walletTokens) {
+        const decimals = getDecimals(token.contract, token.decimals)
+
         try {
           const balance = wallet.network === 'ERC20'
             ? await getERC20Balance(wallet.address, token.contract)
             : await getTRC20Balance(wallet.address, token.contract)
+
+          // Save to DB
+          await prisma.balance.upsert({
+            where: {
+              network_wallet_contract: {
+                network: wallet.network,
+                wallet: wallet.address,
+                contract: token.contract,
+              },
+            },
+            update: { balance, token: token.symbol, decimals },
+            create: {
+              network: wallet.network,
+              wallet: wallet.address,
+              contract: token.contract,
+              token: token.symbol,
+              decimals,
+              balance,
+            },
+          })
 
           walletResults.push({
             wallet: wallet.address,
@@ -68,7 +118,7 @@ export async function GET(req: NextRequest) {
             network: wallet.network,
             token: token.symbol,
             contract: token.contract,
-            decimals: getDecimals(token.contract, token.decimals),
+            decimals,
             balance,
           })
         } catch {
@@ -78,7 +128,7 @@ export async function GET(req: NextRequest) {
             network: wallet.network,
             token: token.symbol,
             contract: token.contract,
-            decimals: getDecimals(token.contract, token.decimals),
+            decimals,
             balance: 'error',
           })
         }
