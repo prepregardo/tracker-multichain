@@ -78,6 +78,7 @@ export async function GET(req: NextRequest) {
       contract: string | null
       decimals: number
       balance: string
+      error?: string
     }[] = []
 
     const walletPromises = pageWallets.map(async (wallet) => {
@@ -87,12 +88,27 @@ export async function GET(req: NextRequest) {
       for (const token of walletTokens) {
         const decimals = getDecimals(token.contract, token.decimals)
 
+        let balance: string
         try {
-          const balance = wallet.network === 'ERC20'
+          balance = wallet.network === 'ERC20'
             ? await getERC20Balance(wallet.address, token.contract)
             : await getTRC20Balance(wallet.address, token.contract)
+        } catch (e: any) {
+          walletResults.push({
+            wallet: wallet.address,
+            walletLabel: wallet.label,
+            network: wallet.network,
+            token: token.symbol,
+            contract: token.contract,
+            decimals,
+            balance: 'error',
+            error: e.message || 'Fetch failed',
+          })
+          continue
+        }
 
-          // Save to DB
+        // Save to DB (non-blocking — don't lose balance if DB fails)
+        try {
           await prisma.balance.upsert({
             where: {
               network_wallet_contract: {
@@ -111,27 +127,19 @@ export async function GET(req: NextRequest) {
               balance,
             },
           })
-
-          walletResults.push({
-            wallet: wallet.address,
-            walletLabel: wallet.label,
-            network: wallet.network,
-            token: token.symbol,
-            contract: token.contract,
-            decimals,
-            balance,
-          })
         } catch {
-          walletResults.push({
-            wallet: wallet.address,
-            walletLabel: wallet.label,
-            network: wallet.network,
-            token: token.symbol,
-            contract: token.contract,
-            decimals,
-            balance: 'error',
-          })
+          // DB save failed (table may not exist) — continue anyway
         }
+
+        walletResults.push({
+          wallet: wallet.address,
+          walletLabel: wallet.label,
+          network: wallet.network,
+          token: token.symbol,
+          contract: token.contract,
+          decimals,
+          balance,
+        })
       }
 
       return walletResults
