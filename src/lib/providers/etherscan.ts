@@ -1,4 +1,4 @@
-const ETHERSCAN_BASE = 'https://api.etherscan.io/api'
+const ETHERSCAN_BASE = 'https://api.etherscan.io/v2/api'
 
 interface EtherscanTx {
   hash: string
@@ -19,15 +19,15 @@ export async function getERC20Transactions(
   walletAddress: string,
   contractAddress?: string,
   page = 1,
-  offset = 50
+  offset = 100
 ): Promise<EtherscanTx[]> {
   const apiKey = process.env.ETHERSCAN_API_KEY
   if (!apiKey) throw new Error('ETHERSCAN_API_KEY not configured')
 
-  const action = contractAddress ? 'tokentx' : 'txlist'
   const params = new URLSearchParams({
+    chainid: '1',
     module: 'account',
-    action,
+    action: 'tokentx',
     address: walletAddress,
     startblock: '0',
     endblock: '99999999',
@@ -44,7 +44,12 @@ export async function getERC20Transactions(
   const res = await fetch(`${ETHERSCAN_BASE}?${params}`)
   const data = await res.json()
 
-  if (data.status !== '1') return []
+  if (data.status !== '1') {
+    // Log the error for debugging but don't throw
+    console.error('Etherscan API error:', data.message, data.result)
+    return []
+  }
+
   return data.result as EtherscanTx[]
 }
 
@@ -56,6 +61,7 @@ export async function getERC20Balance(
   if (!apiKey) throw new Error('ETHERSCAN_API_KEY not configured')
 
   const params = new URLSearchParams({
+    chainid: '1',
     module: 'account',
     action: contractAddress ? 'tokenbalance' : 'balance',
     address: walletAddress,
@@ -71,5 +77,6 @@ export async function getERC20Balance(
   const data = await res.json()
 
   if (data.status !== '1') return '0'
+
   return data.result
 }
