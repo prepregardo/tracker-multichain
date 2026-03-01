@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       })
 
       // Enrich with wallet labels
-      const walletAddresses = [...new Set(cached.map((b) => b.wallet))]
+      const walletAddresses = Array.from(new Set(cached.map((b) => b.wallet)))
       const wallets = await prisma.wallet.findMany({
         where: { address: { in: walletAddresses } },
       })
